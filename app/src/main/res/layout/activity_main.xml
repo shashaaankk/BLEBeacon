@@ -7,13 +7,63 @@
     android:layout_height="match_parent"
     tools:context=".MainActivity">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Hello World!"
+    <LinearLayout
+        android:layout_width="409dp"
+        android:layout_height="657dp"
+        android:layout_marginStart="10dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginBottom="10dp"
+        android:orientation="vertical"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="0.0">
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="100dp" />
+
+        <TextView
+            android:id="@+id/humidity"
+            android:layout_width="match_parent"
+            android:layout_height="81dp"
+            android:autoSizeMaxTextSize="30dp"
+            android:autoSizeMinTextSize="10dp"
+            android:autoSizeTextType="uniform"
+            android:fontFamily="monospace"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="20dp"
+            android:paddingStart="20dp"
+            android:paddingLeft="20dp"
+            android:paddingTop="20dp"
+            android:paddingEnd="20dp"
+            android:paddingRight="20dp"
+            android:paddingBottom="20dp"
+            android:text="Weather &amp; Fan Control App"
+            android:textAlignment="center"
+            android:textAppearance="@style/TextAppearance.AppCompat.Display1"
+            android:textColor="#FFE1E1"
+            android:textColorHighlight="#171616"
+            android:textColorHint="#673AB7"
+            android:textColorLink="#3F51B5" />
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="150dp"
+            android:background="#090909" />
+
+        <Button
+            android:id="@+id/toScanButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="25dp"
+            android:layout_marginEnd="25dp"
+            android:fontFamily="monospace"
+            android:text="SCAN AND CONTROL"
+            android:textColorLink="#3F51B5" />
+
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
