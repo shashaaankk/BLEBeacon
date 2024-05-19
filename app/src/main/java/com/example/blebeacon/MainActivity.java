@@ -1,36 +1,26 @@
 package com.example.blebeacon;
 
 import android.annotation.SuppressLint;
-import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
-import android.bluetooth.le.BluetoothLeScanner;
-import android.bluetooth.le.ScanCallback;
-import android.bluetooth.le.ScanFilter;
-import android.bluetooth.le.ScanResult;
-import android.bluetooth.le.ScanSettings;
+import android.bluetooth.le.BluetoothLeScanner;;
 import android.content.Context;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
-import android.view.View;
 import android.widget.Button;
 import android.widget.Toast;
-
 import androidx.activity.EdgeToEdge;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +42,10 @@ public class MainActivity extends AppCompatActivity {
     public static final String EXTRAS_DEVICE_NAME = "DEVICE_NAME";
     public static final String EXTRAS_DEVICE_ADDRESS = "DEVICE_ADDRESS";
 
+    // Constants
+    private static final int RSSI_AT_1M = -59;  //FIND OUT
+    private static final double PATH_LOSS_EXPONENT = 2.0; //FIND OUT
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -62,6 +56,9 @@ public class MainActivity extends AppCompatActivity {
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
             return insets;
         });
+
+        //Stop previous scanning upon creation
+        scanning = false;
 
         /*
          * Setting up BluetoothScanner for Discovering Nearby BLE Devices
@@ -74,7 +71,6 @@ public class MainActivity extends AppCompatActivity {
             if (bluetoothAdapter != null) {
                 // Get the BluetoothLeScanner
                 bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
-                Log.d(null, "Got Bluetooth Scanner");
                 if (bluetoothLeScanner == null) {
                     Toast.makeText(this, "Unable to obtain a BluetoothLeScanner", Toast.LENGTH_SHORT).show();
                 }
@@ -85,15 +81,12 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "BluetoothManager not available", Toast.LENGTH_SHORT).show();
         }
 
-//        toscanButton = findViewById(R.id.toScanButton);
+        toscanButton = findViewById(R.id.button);
+        toscanButton.setOnClickListener(v -> {
+            Log.d("SCAN BUTTON", "Scan Button Pressed");
+            scanLeDevice();
+        });
 
-//        //Transition
-//        toscanButton.setOnClickListener(v -> {
-//
-//            Intent intent = new Intent(MainActivity.this, BeaconActivity.class);
-//            startActivity(intent);
-//
-//        });
         mPermissionLauncher = registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), new ActivityResultCallback<Map<String, Boolean>>() {
             @Override
             //Update Permissions
@@ -167,40 +160,35 @@ public class MainActivity extends AppCompatActivity {
     @SuppressLint("MissingPermission")
     private void scanLeDevice() {
         if (!scanning) {
-            String IPVSEDDYSTONE = "F6:B6:2A:79:7B:5D";
-            ScanFilter filterBeacon = new ScanFilter.Builder()
-                    .setDeviceAddress(IPVSEDDYSTONE)
-                    .build();
-            List<ScanFilter> filters = new ArrayList<>();
-            filters.add(filterBeacon);
-            ScanSettings settings = new ScanSettings.Builder()
-                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                    .build();
-            mHandler.postDelayed(new Runnable() {
-                @SuppressLint("MissingPermission")
-                @Override
-                public void run() {
-                    scanning = false;
-                    bluetoothLeScanner.stopScan((ScanCallback) BleScanCallback);
-                }
-            }, SCAN_PERIOD);
-
-            //scanning = true;
-            //bluetoothLeScanner.startScan(BleScanCallback);
-            bluetoothLeScanner.startScan(filters, settings, (ScanCallback) BleScanCallback);
+            Log.d("SCAN", "Scanning Now...");
+            bluetoothAdapter.startLeScan(BleScanCallback);
         } else {
-            Toast.makeText(this, "Stopping scan!", Toast.LENGTH_SHORT).show();
             scanning = false;
-            bluetoothLeScanner.stopScan((ScanCallback) BleScanCallback);
+            bluetoothAdapter.stopLeScan(BleScanCallback);
         }
     }
 
-
     private final BluetoothAdapter.LeScanCallback BleScanCallback = new BluetoothAdapter.LeScanCallback() {
+        @SuppressLint("MissingPermission")
         @Override
         public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
+            Log.d("BLE", "Device: " + device.getName() + ", RSSI: " + rssi);
+            calculateDistance(rssi);
 
         }
     };
+
+    /**
+     * RSSI to meter
+     * Distance = 10^((Measured Power - Instant RSSI)/(10*N)).
+     * N is the constant for the environmental factor (2-4)
+     * The measured power is the RSSI value at one meter
+     */
+    public static void calculateDistance(int rssi) {
+        double dist = Math.pow(10, (RSSI_AT_1M - rssi) / (10 * PATH_LOSS_EXPONENT));
+        Log.d("DISTANCE in meters: ", String.valueOf(dist));
+        //TODO: Display
+    }
+
 
 }
