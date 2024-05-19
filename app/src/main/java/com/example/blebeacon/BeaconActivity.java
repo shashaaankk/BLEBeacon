@@ -77,19 +77,7 @@ import java.util.UUID;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
-public class BeaconActivity { }
-public class ScanDispActivity extends ListActivity {
-    // Interested UUIDs
-    // Reference: https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Assigned_Numbers/out/en/Assigned_Numbers.pdf?v=1715622654160
-    private final UUID uuid1 = UUID.fromString("00000002-0000-0000-FDFD-FDFDFDFDFDFD");         //Weather: Service
-    private final UUID uuid2 = UUID.fromString("00000001-0000-0000-FDFD-FDFDFDFDFDFD");         //FAN
-    private final UUID uuidlighht = UUID.fromString ("10000001-0000-0000-FDFD-FDFDFDFDFDFD");
-    //private final UUID uuid_temp = UUID.fromString("00002a1c-0000-1000-8000-00805f9b34fb");         //Characteristic Temp
-    private final UUID uuid_temp = convertFromInteger(0x2A1C);
-    //private final UUID uuid_temp = convertFromInteger(0x2A1F);
-    private final UUID uuid_humidity = UUID.fromString("00002a6f-0000-1000-8000-00805f9b34fb"); //Characteristic
-    private final UUID uuid1_char = convertFromInteger(0x2902);
-    private static final int MAX_VALUE = 65535;
+public class BeaconActivity extends ListActivity {
 
     //Reference: https://medium.com/@shahar_avigezer/bluetooth-low-energy-on-android-22bc7310387a/
     public UUID convertFromInteger(int i) {
@@ -110,19 +98,10 @@ public class ScanDispActivity extends ListActivity {
     private Button ScanBtn;
     private Button disconnect;
     private TextView instruct;
-    private int userInput;
 
     @SuppressLint("MissingPermission")
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        mHandler = new Handler();
-        listItems = new ArrayList<>();
-        listView = getListView();
-        mleDeviceListAdapter = new LeDeviceListAdapter();
-        listView.setAdapter(mleDeviceListAdapter);
-        ScanBtn = findViewById(R.id.Scanbutton);
-        instruct = findViewById(R.id.disp);
 
         /*
          * Setting up BluetoothScanner for Discovering Nearby BLE Devices
@@ -145,6 +124,16 @@ public class ScanDispActivity extends ListActivity {
         } else {
             Toast.makeText(this, "BluetoothManager not available", Toast.LENGTH_SHORT).show();
         }
+
+        super.onCreate(savedInstanceState);
+        mHandler = new Handler();
+        listItems = new ArrayList<>();
+        listView = getListView();
+        mleDeviceListAdapter = new LeDeviceListAdapter();
+        listView.setAdapter(mleDeviceListAdapter);
+        ScanBtn = findViewById(R.id.Scanbutton);
+        instruct = findViewById(R.id.disp);
+
         //Scan
         ScanBtn.setOnClickListener(v -> {
             if (bluetoothLeScanner != null)
@@ -154,6 +143,7 @@ public class ScanDispActivity extends ListActivity {
                 Log.d(null, "Starting Scan!");
             }
         });
+
         //Disconnection
         disconnect = findViewById(R.id.transition);
         disconnect.setOnClickListener(v -> {
@@ -170,7 +160,7 @@ public class ScanDispActivity extends ListActivity {
         public LeDeviceListAdapter() {
             super();
             mLeDevices = new ArrayList<BluetoothDevice>();
-            mInflator = ScanDispActivity.this.getLayoutInflater();
+            mInflator = BeaconActivity.this.getLayoutInflater();
         }
         public void addDevice(BluetoothDevice device) {
             if(!mLeDevices.contains(device)) {
@@ -214,17 +204,12 @@ public class ScanDispActivity extends ListActivity {
     @SuppressLint("MissingPermission")
     private void scanLeDevice() {
         if (!scanning) {
-            String IPVSWeather = "F6:B6:2A:79:7B:5D";
-            String IPVSLight = "F8:20:74:F7:2B:82";
-            ScanFilter filterWeather = new ScanFilter.Builder()
-                    .setDeviceAddress(IPVSWeather)
-                    .build();
-            ScanFilter filterLight= new ScanFilter.Builder()
-                    .setDeviceAddress(IPVSLight)
+            String IPVSEDDYSTONE = "F6:B6:2A:79:7B:5D";
+            ScanFilter filterBeacon = new ScanFilter.Builder()
+                    .setDeviceAddress(IPVSEDDYSTONE)
                     .build();
             List<ScanFilter> filters = new ArrayList<>();
-            filters.add(filterWeather);
-            filters.add(filterLight);
+            filters.add(filterBeacon);
             ScanSettings settings = new ScanSettings.Builder()
                     .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                     .build();
@@ -236,6 +221,7 @@ public class ScanDispActivity extends ListActivity {
                     bluetoothLeScanner.stopScan(BleScanCallback);
                 }
             }, SCAN_PERIOD);
+
             //scanning = true;
             //bluetoothLeScanner.startScan(BleScanCallback);
             bluetoothLeScanner.startScan(filters, settings, BleScanCallback);
@@ -259,24 +245,6 @@ public class ScanDispActivity extends ListActivity {
         }
     };
     @SuppressLint("MissingPermission")
-    private void setupNotifications()
-    {
-        BluetoothGattCharacteristic temp = bluetoothGatt.getService(uuid1).getCharacteristic(uuid_temp);
-        BluetoothGattDescriptor descriptor_t = temp.getDescriptor(uuid1_char);
-        bluetoothGatt.setCharacteristicNotification(temp,true);
-        descriptor_t.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-        bluetoothGatt.writeDescriptor(descriptor_t);
-    }
-    @SuppressLint("MissingPermission")
-    private void writefan(int value){
-        byte[] bytes = new byte[2];
-        bytes[0] = (byte) (value & 0xFF);        // Lower byte
-        bytes[1] = (byte) ((value >> 8) & 0xFF); // Upper byte
-        BluetoothGattCharacteristic shutter = bluetoothGatt.getService(uuid2).getCharacteristic(uuidlighht);
-        shutter.setValue(bytes);
-        bluetoothGatt.writeCharacteristic(shutter);
-    }
-    @SuppressLint("MissingPermission")
     @Override
     protected void onListItemClick(ListView l, View v, int position, long id) {
         Toast.makeText(this, "Connecting!", Toast.LENGTH_SHORT).show();
@@ -290,8 +258,6 @@ public class ScanDispActivity extends ListActivity {
         }
     }
     private int mConnectionState;
-    private  String h = "";
-    private  String t = "";
     /*Reference Android Connectivity Samples: GitHub*/
     private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
@@ -310,67 +276,20 @@ public class ScanDispActivity extends ListActivity {
         }
         @SuppressLint("MissingPermission")
         @Override
-        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                instruct.setText("CB: GATT Services Discoverd");
-                Log.d("service",gatt.getDevice().getName());
-                Log.d("service",gatt.getServices().get(0).toString());
-                if (gatt.getDevice().getAddress().equals("F6:B6:2A:79:7B:5D")) //checks for ipvsweather device
-                    setupNotifications();
-                if (gatt.getDevice().getAddress().equals("F8:20:74:F7:2B:82"))
-                    writefan(userInput);
-            }
-        }
+        public void onServicesDiscovered(BluetoothGatt gatt, int status) {}
         @SuppressLint("MissingPermission")
         @Override
-        public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
-            super.onDescriptorWrite(gatt, descriptor, status);
-            Log.d("service","desriptor writer");
-            BluetoothGattCharacteristic humidity = bluetoothGatt.getService(uuid1).getCharacteristic(uuid_humidity);
-            BluetoothGattDescriptor descriptor_h = humidity.getDescriptor(uuid1_char);
-            if (!descriptor_h.equals(descriptor))
-            {
-                bluetoothGatt.setCharacteristicNotification(humidity,true);
-                descriptor_h.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                bluetoothGatt.writeDescriptor(descriptor_h);
-            }
-        }
+        public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {}
         @Override
-        public void onCharacteristicRead(BluetoothGatt gatt,
-                                         BluetoothGattCharacteristic characteristic,
-                                         int status) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                instruct.setText("Fan Speed: " +characteristic.getIntValue(BluetoothGattCharacteristic.FORMAT_UINT16,0).toString());
-                Log.d("service",characteristic.getIntValue(BluetoothGattCharacteristic.FORMAT_UINT16,0).toString());
-            }
-        }
+        public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) { }
         @SuppressLint("MissingPermission")//REM:Not used
         @Override
-        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-            Log.d("service",characteristic.toString());
-            BluetoothGattCharacteristic shutter = gatt.getService(uuid2).getCharacteristic(uuidlighht);
-            gatt.readCharacteristic(shutter);
-        }
+        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {}
         @Override
-        public void onCharacteristicChanged(@NonNull BluetoothGatt gatt, @NonNull BluetoothGattCharacteristic characteristic, @NonNull byte[] value) {
-
-            super.onCharacteristicChanged(gatt, characteristic, value);
-            if (characteristic.equals(bluetoothGatt.getService(uuid1).getCharacteristic(uuid_temp))){
-                t = String.valueOf(decodeTemperatureCharacteristic(characteristic));
-            }
-            if (characteristic.equals(bluetoothGatt.getService(uuid1).getCharacteristic(uuid_humidity))){
-                //Log.d("service","sensor update humidity"+String.valueOf(value));
-                h = String.valueOf(convertBytesToFloatH(value));
-            }
-            instruct.setText("Temperature:" + t +"°C"+ "\n" + "Humidity:" + h+"%");
-        }
+        public void onCharacteristicChanged(@NonNull BluetoothGatt gatt, @NonNull BluetoothGattCharacteristic characteristic, @NonNull byte[] value) {}
     };
     @SuppressLint("MissingPermission")
     public void disconnect() {
-        if (bluetoothAdapter == null || bluetoothGatt == null) {
-            //Not Initialized
-            return;
-        }
         bluetoothGatt.disconnect();
     }
     @SuppressLint("MissingPermission")
@@ -385,39 +304,5 @@ public class ScanDispActivity extends ListActivity {
         TextView deviceName;
         TextView deviceAddress; //MAC
     }
-
-    public float convertBytesToFloatH(byte[] data) {
-        //int value = ((data[0] & 0xFF) << 8) | (data[1] & 0xFF); // big-endian format
-        int value = ((data[1] & 0xFF) << 8) | (data[0] & 0xFF);   // little-endian format
-        return value / 100.0f;                                    // scaling
-    }
-
-    public double decodeTemperatureCharacteristic(BluetoothGattCharacteristic characteristic) {
-        if (characteristic == null) {
-            Log.d("TEMPERATURE", "Characteristic is null");
-        }
-        byte[] data = characteristic.getValue();
-        if (data == null || data.length < 5) {
-            Log.d("TEMPERATURE", "Invalid data length: " + (data == null ? "null" : data.length));
-        }
-        // Read the flags byte
-        byte flags = data[0];
-        boolean isFahrenheit = (flags & 0x01) != 0;
-        // Decode IEEE 11073 FLOAT
-        byte[] tempBytes = new byte[4];
-        System.arraycopy(data, 1, tempBytes, 0, 4);
-        ByteBuffer byteBuffer = ByteBuffer.wrap(tempBytes).order(ByteOrder.LITTLE_ENDIAN);
-        // Extract magnitude (first three bytes as a 24-bit signed integer)
-        int magnitude = byteBuffer.getShort() & 0xFFFF | (byteBuffer.get() << 16);
-        // Extract exponent (last byte as a signed 8-bit integer)
-        byte exponent = byteBuffer.get();
-        // Calculate temperature based on magnitude and exponent
-        double temperature = magnitude * Math.pow(10, exponent);
-        // Log the temperature
-        String unit = isFahrenheit ? "°F" : "°C";
-        Log.d("THIS", "Temperature is " + String.format("%.2f", temperature) + unit);
-        return temperature;
-    }
-
 }
 

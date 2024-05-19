@@ -3,15 +3,19 @@ package com.example.blebeacon;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.Handler;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.Toast;
@@ -40,10 +44,13 @@ public class MainActivity extends AppCompatActivity {
     private boolean isACCESS_COARSE_LOCATION = false;
     private boolean isACCESS_FINE_LOCATION = false;
     private Button toscanButton;
-
+    private BluetoothLeScanner bluetoothLeScanner;
+    BluetoothAdapter bluetoothAdapter;
+    private boolean scanning;
+    private Handler mHandler;
+    private static final long SCAN_PERIOD = 10000;     //Scan Period of 10s
     public static final String EXTRAS_DEVICE_NAME = "DEVICE_NAME";
     public static final String EXTRAS_DEVICE_ADDRESS = "DEVICE_ADDRESS";
-
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -56,9 +63,31 @@ public class MainActivity extends AppCompatActivity {
             return insets;
         });
 
-        toscanButton = findViewById(R.id.toScanButton);
+        /*
+         * Setting up BluetoothScanner for Discovering Nearby BLE Devices
+         * Bluetooth Manager is used to obtain an instance of BluetoothAdapter
+         * Bluetooth adapter represents local device bluetooth adapter, required for performing bluetooth tasks
+         */
+        BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+        if (bluetoothManager != null) {
+            bluetoothAdapter = bluetoothManager.getAdapter();
+            if (bluetoothAdapter != null) {
+                // Get the BluetoothLeScanner
+                bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+                Log.d(null, "Got Bluetooth Scanner");
+                if (bluetoothLeScanner == null) {
+                    Toast.makeText(this, "Unable to obtain a BluetoothLeScanner", Toast.LENGTH_SHORT).show();
+                }
+            } else {
+                Toast.makeText(this, "Bluetooth is not supported on this device", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            Toast.makeText(this, "BluetoothManager not available", Toast.LENGTH_SHORT).show();
+        }
 
-        //Transition
+//        toscanButton = findViewById(R.id.toScanButton);
+
+//        //Transition
 //        toscanButton.setOnClickListener(v -> {
 //
 //            Intent intent = new Intent(MainActivity.this, BeaconActivity.class);
@@ -134,5 +163,44 @@ public class MainActivity extends AppCompatActivity {
             mPermissionLauncher.launch(permissions.toArray(new String[0]));
         }
     }
+
+    @SuppressLint("MissingPermission")
+    private void scanLeDevice() {
+        if (!scanning) {
+            String IPVSEDDYSTONE = "F6:B6:2A:79:7B:5D";
+            ScanFilter filterBeacon = new ScanFilter.Builder()
+                    .setDeviceAddress(IPVSEDDYSTONE)
+                    .build();
+            List<ScanFilter> filters = new ArrayList<>();
+            filters.add(filterBeacon);
+            ScanSettings settings = new ScanSettings.Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .build();
+            mHandler.postDelayed(new Runnable() {
+                @SuppressLint("MissingPermission")
+                @Override
+                public void run() {
+                    scanning = false;
+                    bluetoothLeScanner.stopScan((ScanCallback) BleScanCallback);
+                }
+            }, SCAN_PERIOD);
+
+            //scanning = true;
+            //bluetoothLeScanner.startScan(BleScanCallback);
+            bluetoothLeScanner.startScan(filters, settings, (ScanCallback) BleScanCallback);
+        } else {
+            Toast.makeText(this, "Stopping scan!", Toast.LENGTH_SHORT).show();
+            scanning = false;
+            bluetoothLeScanner.stopScan((ScanCallback) BleScanCallback);
+        }
+    }
+
+
+    private final BluetoothAdapter.LeScanCallback BleScanCallback = new BluetoothAdapter.LeScanCallback() {
+        @Override
+        public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
+
+        }
+    };
 
 }
