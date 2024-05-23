@@ -24,6 +24,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -40,6 +41,12 @@ public class MainActivity extends AppCompatActivity {
     BluetoothAdapter bluetoothAdapter;
     private boolean scanning;
     private TextView display;
+    private float distance;
+    private String url;
+    private String uid;
+    private float temperature;
+    private float voltage;
+    Map<String, Object> results = new HashMap<>();
 
     // Calibration Constants
     private static final int RSSI_AT_1M = -98;            //-17+(-41)
@@ -173,10 +180,22 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
             //Log.d("BLEBEACONDATA", " RSSI: " + rssi + ",Byte Data: " + Arrays.toString(scanRecord));
-            calculateDistance(rssi);
-            identifyEddystoneFrame(scanRecord);
+            distance = calculateDistance(rssi);
+            results.put("distance", distance);
+            results = identifyEddystoneFrame(scanRecord);
+            updateDisplay();
         }
     };
+    private void updateDisplay() {
+        StringBuilder displayText = new StringBuilder();
+        displayText.append("UID: ").append(results.get("uid")).append("\n");
+        displayText.append("Distance: ").append(results.get("distance")).append("m\n");
+        displayText.append("Temperature: ").append(results.get("temperature")).append("°C\n");
+        displayText.append("Voltage: ").append(results.get("voltage")).append("mV\n");
+        displayText.append("URL: ").append(results.get("url"));//.append("\n");
+
+        display.setText(displayText.toString());
+    }
     //TODO: Calibrate
     /**
      * RSSI to meter
@@ -184,57 +203,96 @@ public class MainActivity extends AppCompatActivity {
      * N is the constant for the environmental factor (2-4)
      * The measured power is the RSSI value at one meter
      */
-    public void calculateDistance(int rssi) {
-        double dist = Math.pow(10, (RSSI_AT_1M - rssi) / (10 * PATH_LOSS_EXPONENT));
-        //Log.d("DISTANCEINMETERS", String.valueOf(dist));
+    public float calculateDistance(int rssi) {
+        float filteredRSSI = maFilter(rssi);
+        float dist = (float) Math.pow(10, (RSSI_AT_1M - filteredRSSI) / (10 * PATH_LOSS_EXPONENT));
+        Log.d("DISTANCEINMETERS", String.valueOf(dist));
         display.setText("RSSI: " + rssi + "dBm \n" );
-        //display.setText("Distance: " + String.format("%.2f", dist) + "m \n" );
+        display.setText("Distance: " + String.format("%.2f", dist) + "m \n" );
+        return dist;
     }
     /*Reference Lecture Slide*/
-    private void identifyEddystoneFrame(byte[] scanRecord) {
+    private Map<String, Object> identifyEddystoneFrame(byte[] scanRecord) {
         int index = 0;
-        String URL;
         while (index < scanRecord.length) {
             int length = scanRecord[index] & 0xFF;
             if (length == 0) break;
             int frameType = scanRecord[index + 11] & 0xFF;
             switch (frameType) {
                 case 0x00:
-                    Log.d("EddystoneFrame", "UID Frame");
-                    Log.d("DEBUG", String.valueOf(length));
+                    //Log.d("EddystoneFrame", "UID Frame");
+                    uid = getUID(scanRecord);
                     break;
                 case 0x10:
-                    Log.d("EddystoneFrame", "URL Frame");
+                    //Log.d("EddystoneFrame", "URL Frame");
                     int indexURL = 0;
                     byte[] urlbytes = new byte[100];
                     for(int i=13;i<scanRecord.length;i++) {
                         urlbytes[indexURL] = scanRecord[i];
                         indexURL++;
                     }
-                    URL = convertUrlBytestoURL(urlbytes);
-                    //use this URL in text view to display in GUI
+                    url = getURL(urlbytes);
                     break;
                 case 0x20:
                     //Log.d("EddystoneFrame", "TLM Frame");
-                    byte[] Voltbytes = new byte[2];
-                    Voltbytes[0] = (byte) (scanRecord[13] & 0xFF); // MSB //Big Endian
-                    Voltbytes[1] = (byte) (scanRecord[14] & 0xFF); // LSB
-                    int voltage = ((Voltbytes[0] & 0xFF) << 8) | (Voltbytes[1] & 0xFF);
-                    Log.d("TLMFrame", "Voltage: " + voltage + " mV");
-
-                    byte[] Tempbytes = new byte[2];
-                    Tempbytes[0] = (byte) (scanRecord[15] & 0xFF);        // Lower byte //Big Endian
-                    Tempbytes[1] = (byte) (scanRecord[16]& 0xFF);         // Upper byte
-                    Log.d("DEBUG", "Raw MSB byte: " + String.format("%02X", Tempbytes[0]));
-                    Log.d("DEBUG", "Raw LSB byte: " + String.format("%02X", Tempbytes[1]));
-                    int temperature = ((Tempbytes[0] & 0xFF) << 8) | (Tempbytes[1] & 0xFF);
-                    Log.d("TLMFrame", "Temperature: " + temperature + "C");
+                    //VTG
+                    voltage = getVoltage(scanRecord);
+                    //TEMPERATURE
+                    temperature = getTemperature(scanRecord);
                     break;
             }
             index += length + 1;
         }
+        results.put("uid", uid);
+        results.put("url", url);
+        results.put("voltage", voltage);
+        results.put("temperature", temperature);
+
+        return results;
     }
-    private String convertUrlBytestoURL(byte[] urlbytes){
+
+    //Moving Average Filter to filer RSSI
+    private final int windowSize = 100; //Vary and Check
+    private int head = 0;
+    private float[] window;
+    public float maFilter(int rssi){
+        window[head] = rssi;
+        head = (head+1)%windowSize;
+        float sum = 0;
+        for (float value:window){
+            sum+=value;
+        }
+        return sum/windowSize;
+    }
+    public int getVoltage(byte[] scanRecord){
+        byte[] Voltbytes = new byte[2];
+        Voltbytes[0] = (byte) (scanRecord[13] & 0xFF); // MSB //Big Endian
+        Voltbytes[1] = (byte) (scanRecord[14] & 0xFF); // LSB
+        int voltage = ((Voltbytes[0] & 0xFF) << 8) | (Voltbytes[1] & 0xFF);
+        Log.d("TLMFrame", "Voltage: " + voltage + " mV");
+        display.setText("Distance: " + String.format("%.2f", voltage) + "m \n" );
+        return voltage;
+    }
+
+    public float getTemperature(byte[] scanRecord){
+        byte[] Tempbytes = new byte[2];
+        Tempbytes[0] = (byte) (scanRecord[15] & 0xFF);        // Lower byte //Big Endian
+        Tempbytes[1] = (byte) (scanRecord[16]& 0xFF);         // Upper byte
+        // Convert the fractional part to a decimal
+        double fractionalDecimal = Tempbytes[1] / 256.0;      //LSB/256
+        Log.d("DEBUG", "Raw MSB byte: " + String.format("%02X", Tempbytes[0]));
+        Log.d("DEBUG", "Raw LSB byte: " + String.format("%02X", Tempbytes[1]));
+        double temperature = Tempbytes[0] + fractionalDecimal;
+        Log.d("TLMFrame", "Temperature: " + temperature + "C");
+        display.setText("Distance: " + String.format("%.2f", temperature) + "m \n" );
+        return (float) temperature;
+    }
+    public String getUID(byte[] scanRecord){
+        //Test
+        return "MCL05";
+    }
+
+    private String getURL(byte[] urlbytes){
         String str = null ;
         char character;
         for (int i =0;i< urlbytes.length; i++){
