@@ -193,6 +193,7 @@ public class MainActivity extends AppCompatActivity {
     /*Reference Lecture Slide*/
     private void identifyEddystoneFrame(byte[] scanRecord) {
         int index = 0;
+        String URL;
         while (index < scanRecord.length) {
             int length = scanRecord[index] & 0xFF;
             if (length == 0) break;
@@ -204,6 +205,14 @@ public class MainActivity extends AppCompatActivity {
                     break;
                 case 0x10:
                     Log.d("EddystoneFrame", "URL Frame");
+                    int indexURL = 0;
+                    byte[] urlbytes = new byte[100];
+                    for(int i=13;i<scanRecord.length;i++) {
+                        urlbytes[indexURL] = scanRecord[i];
+                        indexURL++;
+                    }
+                    URL = convertUrlBytestoURL(urlbytes);
+                    //use this URL in text view to display in GUI
                     break;
                 case 0x20:
                     //Log.d("EddystoneFrame", "TLM Frame");
@@ -225,5 +234,37 @@ public class MainActivity extends AppCompatActivity {
             index += length + 1;
         }
     }
-
+    private String convertUrlBytestoURL(byte[] urlbytes){
+        String str = null ;
+        char character;
+        for (int i =0;i< urlbytes.length; i++){
+            if(i == 0){
+                if(urlbytes[i] == 0x00){
+                    str = str + "http://www.";
+                }
+                else if(urlbytes[i] == 0x01){
+                    str = str + "https://www.";
+                }
+                else if(urlbytes[i] == 0x02){
+                    str = str + "http://";
+                }
+                else if(urlbytes[i] == 0x03){
+                    str = str + "https://";
+                }
+            }
+            else if((urlbytes[i] == 0x00) || (urlbytes[i] == 0x01)) {
+                if(urlbytes[i] == 0x00) {
+                    str = str + ".com/";
+                }
+                else if(urlbytes[i] == 0x01) {
+                    str = str + ".org/";
+                }
+            }
+            else {
+                character = (char) urlbytes[i];
+                str = str + character;
+            }
+        }
+        return str;
+    }
 }
