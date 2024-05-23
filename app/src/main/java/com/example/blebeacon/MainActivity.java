@@ -38,6 +38,9 @@ public class MainActivity extends AppCompatActivity {
     BluetoothAdapter bluetoothAdapter;
     private boolean scanning;
     private Handler mHandler;
+    private int Samples = 100;
+    private int noOfreceivedSample = 0;
+    private int sumOfReceivedSample = 0;
     private static final long SCAN_PERIOD = 10000;     //Scan Period of 10s
     public static final String EXTRAS_DEVICE_NAME = "DEVICE_NAME";
     public static final String EXTRAS_DEVICE_ADDRESS = "DEVICE_ADDRESS";
@@ -173,7 +176,17 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
             Log.d("BLE", "Device: " + device.getName() + ", RSSI: " + rssi);
-            calculateDistance(rssi);
+            if(noOfreceivedSample < Samples)
+            {
+                noOfreceivedSample++;
+                sumOfReceivedSample += rssi;
+            }
+            else
+            {
+                Log.d("Average Value","Average of all received values" + sumOfReceivedSample);
+                noOfreceivedSample = 0;
+                calculateDistance(sumOfReceivedSample/Samples);
+            }
 
         }
     };
