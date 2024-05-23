@@ -1,14 +1,15 @@
 package com.example.blebeacon;
 
+import static java.lang.System.exit;
+
 import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
-import android.bluetooth.le.BluetoothLeScanner;;
+import android.bluetooth.le.BluetoothLeScanner;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.os.Handler;
 import android.util.Log;
 import android.widget.Button;
 import android.widget.TextView;
@@ -23,7 +24,6 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +36,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean isBLUETOOTH_CONNECT = false;
     private boolean isACCESS_COARSE_LOCATION = false;
     private boolean isACCESS_FINE_LOCATION = false;
-    private Button toscanButton;
     private BluetoothLeScanner bluetoothLeScanner;
     BluetoothAdapter bluetoothAdapter;
     private boolean scanning;
@@ -46,6 +45,7 @@ public class MainActivity extends AppCompatActivity {
     private String uid;
     private float temperature;
     private float voltage;
+    private static boolean isPressed = false;
     Map<String, Object> results = new HashMap<>();
 
     // Calibration Constants
@@ -86,12 +86,14 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "BluetoothManager not available", Toast.LENGTH_SHORT).show();
         }
 
-        toscanButton = findViewById(R.id.button);
+        Button toscanButton = findViewById(R.id.button);
         display = findViewById(R.id.disp);
 
         toscanButton.setOnClickListener(v -> {
-            Log.d("SCAN BUTTON", "Scan Button Pressed");
-            scanLeDevice();
+            isPressed = !isPressed;
+            if(isPressed)
+                scanLeDevice();
+            exit();
         });
 
         mPermissionLauncher = registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), new ActivityResultCallback<Map<String, Boolean>>() {
@@ -117,6 +119,10 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         requestPermission();
+    }
+
+    private void exit() {
+        display.setText("Press start to start reading the beacon, stop to stop reading.");
     }
 
     /*Check if Permission has been Granted and update the boolean flags for permission*/
@@ -192,9 +198,11 @@ public class MainActivity extends AppCompatActivity {
         displayText.append("Distance: ").append(results.get("distance")).append("m\n");
         displayText.append("Temperature: ").append(results.get("temperature")).append("°C\n");
         displayText.append("Voltage: ").append(results.get("voltage")).append("mV\n");
-        displayText.append("URL: ").append(results.get("url"));//.append("\n");
-
-        display.setText(displayText.toString());
+        displayText.append("URL: ").append(results.get("url"));
+        if(isPressed)
+            display.setText(displayText.toString());
+        else
+            exit();
     }
     //TODO: Calibrate
     /**
@@ -221,7 +229,20 @@ public class MainActivity extends AppCompatActivity {
             switch (frameType) {
                 case 0x00:
                     //Log.d("EddystoneFrame", "UID Frame");
-                    uid = getUID(scanRecord);
+                    byte[] namespaceId = new byte[10], instanceId = new byte[6];
+                    int namespaceIndex = 0;
+                    int instanceIndex = 0;
+                    // Namespace ID (bytes 13-22 in the scanRecord)
+                    for (int i = 13; i < 23; i++) {
+                        namespaceId[namespaceIndex] = scanRecord[i];
+                        namespaceIndex++;
+                    }
+                    // Instance ID (bytes 22-27 in the scanRecord)
+                    for (int i = 23; i < 29; i++) {
+                        instanceId[instanceIndex] = scanRecord[i];
+                        instanceIndex++;
+                    }
+                    uid = getUID(namespaceId, instanceId);
                     break;
                 case 0x10:
                     //Log.d("EddystoneFrame", "URL Frame");
@@ -254,7 +275,7 @@ public class MainActivity extends AppCompatActivity {
     //Moving Average Filter to filer RSSI
     private final int windowSize = 100; //Vary and Check
     private int head = 0;
-    private float[] window;
+    private float[] window = new float[windowSize];
     public float maFilter(int rssi){
         window[head] = rssi;
         head = (head+1)%windowSize;
@@ -287,9 +308,25 @@ public class MainActivity extends AppCompatActivity {
         display.setText("Distance: " + String.format("%.2f", temperature) + "m \n" );
         return (float) temperature;
     }
-    public String getUID(byte[] scanRecord){
-        //Test
-        return "MCL05";
+    public String getUID(byte[] namespaceId, byte[] instanceId){
+        String UID;
+        // Convert to hex strings
+        String namespaceIdHex = bytesToHex(namespaceId);
+        String instanceIdHex = bytesToHex(instanceId);
+        UID = namespaceIdHex + "|" + instanceIdHex;
+        
+        Log.d("UIDFrame", "Namespace ID: " + namespaceIdHex);
+        Log.d("UIDFrame", "Instance ID: " + instanceIdHex);
+        return UID;
+    }
+    private String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02X", b));
+            sb.append(":");
+        }
+        sb.setLength(sb.length() - 1);
+        return sb.toString();
     }
 
     private String getURL(byte[] urlbytes){
