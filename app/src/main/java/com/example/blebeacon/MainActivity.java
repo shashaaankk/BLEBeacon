@@ -1,7 +1,5 @@
 package com.example.blebeacon;
 
-import static java.lang.System.exit;
-
 import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
@@ -40,11 +38,11 @@ public class MainActivity extends AppCompatActivity {
     BluetoothAdapter bluetoothAdapter;
     private boolean scanning;
     private TextView display;
-    private float distance;
-    private String url;
-    private String uid;
-    private float temperature;
-    private float voltage;
+    private float distance = 0;
+    private String url = null;
+    private String uid = null;
+    private  float temperature = 0;
+    private  float voltage = 0;
     private static boolean isPressed = false;
     Map<String, Object> results = new HashMap<>();
 
@@ -91,9 +89,18 @@ public class MainActivity extends AppCompatActivity {
 
         toscanButton.setOnClickListener(v -> {
             isPressed = !isPressed;
-            if(isPressed)
+            if(isPressed) {
                 scanLeDevice();
-            exit();
+            }
+            else{
+                display.setText("Press start to start reading the beacon, stop to stop reading.");
+                distance = 0;
+                url = null;
+                uid = null;
+                temperature = 0;
+                voltage = 0;
+                results.clear();
+            }
         });
 
         mPermissionLauncher = registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), new ActivityResultCallback<Map<String, Boolean>>() {
@@ -121,9 +128,6 @@ public class MainActivity extends AppCompatActivity {
         requestPermission();
     }
 
-    private void exit() {
-        display.setText("Press start to start reading the beacon, stop to stop reading.");
-    }
 
     /*Check if Permission has been Granted and update the boolean flags for permission*/
     private void requestPermission() {
@@ -188,21 +192,20 @@ public class MainActivity extends AppCompatActivity {
             //Log.d("BLEBEACONDATA", " RSSI: " + rssi + ",Byte Data: " + Arrays.toString(scanRecord));
             distance = calculateDistance(rssi);
             results.put("distance", distance);
-            results = identifyEddystoneFrame(scanRecord);
+            //results = identifyEddystoneFrame(scanRecord);
+            results = identifyEddystoneFrames(scanRecord);
             updateDisplay();
         }
     };
     private void updateDisplay() {
         StringBuilder displayText = new StringBuilder();
-        displayText.append("UID: ").append(results.get("uid")).append("\n");
+        displayText.append("N.ID: ").append(results.get("uid")).append("\n");
         displayText.append("Distance: ").append(results.get("distance")).append("m\n");
         displayText.append("Temperature: ").append(results.get("temperature")).append("°C\n");
         displayText.append("Voltage: ").append(results.get("voltage")).append("mV\n");
         displayText.append("URL: ").append(results.get("url"));
         if(isPressed)
             display.setText(displayText.toString());
-        else
-            exit();
     }
     //TODO: Calibrate
     /**
@@ -214,53 +217,57 @@ public class MainActivity extends AppCompatActivity {
     public float calculateDistance(int rssi) {
         float filteredRSSI = maFilter(rssi);
         float dist = (float) Math.pow(10, (RSSI_AT_1M - filteredRSSI) / (10 * PATH_LOSS_EXPONENT));
-        Log.d("DISTANCEINMETERS", String.valueOf(dist));
-        display.setText("RSSI: " + rssi + "dBm \n" );
-        display.setText("Distance: " + String.format("%.2f", dist) + "m \n" );
+        //Log.d("DISTANCEINMETERS", String.valueOf(dist));
+        dist = (float) (Math.round(dist*Math.pow(10,2))/Math.pow(10,2));
         return dist;
     }
     /*Reference Lecture Slide*/
-    private Map<String, Object> identifyEddystoneFrame(byte[] scanRecord) {
+    private Map<String, Object> identifyEddystoneFrames(byte[] scanRecord) {
         int index = 0;
         while (index < scanRecord.length) {
             int length = scanRecord[index] & 0xFF;
             if (length == 0) break;
-            int frameType = scanRecord[index + 11] & 0xFF;
-            switch (frameType) {
-                case 0x00:
-                    //Log.d("EddystoneFrame", "UID Frame");
-                    byte[] namespaceId = new byte[10], instanceId = new byte[6];
-                    int namespaceIndex = 0;
-                    int instanceIndex = 0;
-                    // Namespace ID (bytes 13-22 in the scanRecord)
-                    for (int i = 13; i < 23; i++) {
-                        namespaceId[namespaceIndex] = scanRecord[i];
-                        namespaceIndex++;
+
+            int type = scanRecord[index + 1] & 0xFF;
+            if (type == 0x16) { // 0x16 indicates Service Data
+                int serviceUUID = ((scanRecord[index + 3] & 0xFF) << 8) | (scanRecord[index + 2] & 0xFF);
+                if (serviceUUID == 0xFEAA) { // Eddystone Service UUID
+                    int frameType = scanRecord[index + 4] & 0xFF;
+                    if (frameType == 0x00) { // UID Frame
+                        byte[] namespaceId = new byte[10], instanceId = new byte[6];
+                        int namespaceIndex = 0;
+                        int instanceIndex = 0;
+                        // Namespace ID (bytes 13-22 in the scanRecord)
+                        for (int i = 13; i < 23; i++) {
+                            namespaceId[namespaceIndex] = scanRecord[i];
+                            namespaceIndex++;
+                        }
+                        // Instance ID (bytes 22-27 in the scanRecord)
+                        for (int i = 23; i < 29; i++) {
+                            instanceId[instanceIndex] = scanRecord[i];
+                            instanceIndex++;
+                        }
+                        uid = getUID(namespaceId, instanceId);
+                        Log.d("NEW", "URL: " + url);
+                    } else if (frameType == 0x10) { //URL Frame
+                        int indexURL = 0;
+                        byte[] urlbytes = new byte[100];
+                        for(int i=13;i<scanRecord.length;i++) {
+                            urlbytes[indexURL] = scanRecord[i];
+                            indexURL++;
+                        }
+                        url = getURL(urlbytes);
+                        Log.d("NEW", "URL: " + url);
+                    } else if (frameType == 0x20) { //TLM Frame
+                        //BATTERY VOLTAGE
+                        voltage = getVoltage(scanRecord);
+                        Log.d("NEW", "Voltage: " + voltage + " mV");
+                        //TEMPERATURE
+                        temperature = getTemperature(scanRecord);
+                        Log.d("NEW", "Temperature: " + temperature + "C");
+
                     }
-                    // Instance ID (bytes 22-27 in the scanRecord)
-                    for (int i = 23; i < 29; i++) {
-                        instanceId[instanceIndex] = scanRecord[i];
-                        instanceIndex++;
-                    }
-                    uid = getUID(namespaceId, instanceId);
-                    break;
-                case 0x10:
-                    //Log.d("EddystoneFrame", "URL Frame");
-                    int indexURL = 0;
-                    byte[] urlbytes = new byte[100];
-                    for(int i=13;i<scanRecord.length;i++) {
-                        urlbytes[indexURL] = scanRecord[i];
-                        indexURL++;
-                    }
-                    url = getURL(urlbytes);
-                    break;
-                case 0x20:
-                    //Log.d("EddystoneFrame", "TLM Frame");
-                    //VTG
-                    voltage = getVoltage(scanRecord);
-                    //TEMPERATURE
-                    temperature = getTemperature(scanRecord);
-                    break;
+                }
             }
             index += length + 1;
         }
@@ -291,7 +298,6 @@ public class MainActivity extends AppCompatActivity {
         Voltbytes[1] = (byte) (scanRecord[14] & 0xFF); // LSB
         int voltage = ((Voltbytes[0] & 0xFF) << 8) | (Voltbytes[1] & 0xFF);
         Log.d("TLMFrame", "Voltage: " + voltage + " mV");
-        display.setText("Distance: " + String.format("%.2f", voltage) + "m \n" );
         return voltage;
     }
 
@@ -301,11 +307,10 @@ public class MainActivity extends AppCompatActivity {
         Tempbytes[1] = (byte) (scanRecord[16]& 0xFF);         // Upper byte
         // Convert the fractional part to a decimal
         double fractionalDecimal = Tempbytes[1] / 256.0;      //LSB/256
-        Log.d("DEBUG", "Raw MSB byte: " + String.format("%02X", Tempbytes[0]));
-        Log.d("DEBUG", "Raw LSB byte: " + String.format("%02X", Tempbytes[1]));
+        Log.d("DEBUGTEMPERATURE", "Raw MSB byte: " + String.format("%02X", Tempbytes[0]));
+        Log.d("DEBUGTEMPERATURE", "Raw LSB byte: " + String.format("%02X", Tempbytes[1]));
         double temperature = Tempbytes[0] + fractionalDecimal;
         Log.d("TLMFrame", "Temperature: " + temperature + "C");
-        display.setText("Distance: " + String.format("%.2f", temperature) + "m \n" );
         return (float) temperature;
     }
     public String getUID(byte[] namespaceId, byte[] instanceId){
@@ -313,7 +318,7 @@ public class MainActivity extends AppCompatActivity {
         // Convert to hex strings
         String namespaceIdHex = bytesToHex(namespaceId);
         String instanceIdHex = bytesToHex(instanceId);
-        UID = namespaceIdHex + "|" + instanceIdHex;
+        UID = namespaceIdHex + "\nI.ID: " + instanceIdHex;
         
         Log.d("UIDFrame", "Namespace ID: " + namespaceIdHex);
         Log.d("UIDFrame", "Instance ID: " + instanceIdHex);
@@ -321,11 +326,12 @@ public class MainActivity extends AppCompatActivity {
     }
     private String bytesToHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder();
+        sb.append("0x");
         for (byte b : bytes) {
             sb.append(String.format("%02X", b));
-            sb.append(":");
+            //sb.append(":");
         }
-        sb.setLength(sb.length() - 1);
+        //sb.setLength(sb.length() - 1);
         return sb.toString();
     }
 
@@ -335,24 +341,26 @@ public class MainActivity extends AppCompatActivity {
         for (int i =0;i< urlbytes.length; i++){
             if(i == 0){
                 if(urlbytes[i] == 0x00){
-                    str = str + "http://www.";
+                    str = "http://www.";
                 }
                 else if(urlbytes[i] == 0x01){
-                    str = str + "https://www.";
+                    str = "https://www.";
                 }
                 else if(urlbytes[i] == 0x02){
-                    str = str + "http://";
+                    str = "http://";
                 }
                 else if(urlbytes[i] == 0x03){
-                    str = str + "https://";
+                    str = "https://";
                 }
             }
             else if((urlbytes[i] == 0x00) || (urlbytes[i] == 0x01)) {
                 if(urlbytes[i] == 0x00) {
-                    str = str + ".com/";
+                    str = str + ".com";
+                    break;
                 }
                 else if(urlbytes[i] == 0x01) {
-                    str = str + ".org/";
+                    str = str + ".org";
+                    break;
                 }
             }
             else {
@@ -360,6 +368,7 @@ public class MainActivity extends AppCompatActivity {
                 str = str + character;
             }
         }
+
         return str;
     }
 }
