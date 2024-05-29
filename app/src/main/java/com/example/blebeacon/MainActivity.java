@@ -45,10 +45,31 @@ public class MainActivity extends AppCompatActivity {
     private  float voltage = 0;
     private static boolean isPressed = false;
     Map<String, Object> results = new HashMap<>();
+    private List<Integer> rssiSamples = new ArrayList<>();
 
     // Calibration Constants
-    private static final int RSSI_AT_1M = -98;            //-17+(-41)
-    private static final double PATH_LOSS_EXPONENT = 2.0; //FIGURE OUT
+    private final int TxPower = -17; //Obtained by looking at  UID Frame
+    private static final int RSSI_AT_1M = -58;            //-17+(-41)
+    private static final double PATH_LOSS_EXPONENT = 2.6;
+    //Filtering Parameters
+    private static final int REQUIRED_SAMPLE_COUNT = 100;
+    /*
+    * <-90 dBm: Very weak signal, likely at the edge of usable range.
+    *  -67 dBm: Fairly strong signal.
+    * >-55 dBm: Very strong signal.
+    * >-30 dBm: Extremely strong signal, potentially too close to the transmitter.
+    * */
+    private static final int RANGE_MAX = -10;
+    private static final int RANGE_MIN = -90;
+    private static final int BIN_WIDTH = 10;
+    // Kalman R & Q
+    final double KALMAN_R = 0.125d;
+    final double KALMAN_Q = 0.5d;
+    KalmanFilter mKalmanFilter;
+
+    private static final double TX_POWER = -17; // Tx Power at 0 meters in dBm
+    private static double OFFSET = -700; // Adjust, OFFSET = actualDistance - calculatedDistance;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -63,6 +84,7 @@ public class MainActivity extends AppCompatActivity {
 
         //Stop previous scanning upon creation
         scanning = false;
+        mKalmanFilter = new KalmanFilter(KALMAN_R, KALMAN_Q); // init Kalman Filter
         /*
          * Setting up BluetoothScanner for Discovering Nearby BLE Devices
          * Bluetooth Manager is used to obtain an instance of BluetoothAdapter
@@ -125,6 +147,8 @@ public class MainActivity extends AppCompatActivity {
 
             }
         });
+
+
         requestPermission();
     }
 
@@ -189,45 +213,45 @@ public class MainActivity extends AppCompatActivity {
         @SuppressLint("MissingPermission")
         @Override
         public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
-            //Log.d("BLEBEACONDATA", " RSSI: " + rssi + ",Byte Data: " + Arrays.toString(scanRecord));
-            distance = calculateDistance(rssi);
-            results.put("distance", distance);
-            //results = identifyEddystoneFrame(scanRecord);
+
+            /*Distance*/
+            double mFilteredRSSI = mKalmanFilter.applyFilter(rssi);
+            rssiSamples.add(rssi);
+            if(rssiSamples.size() >= REQUIRED_SAMPLE_COUNT)
+            {
+                int modeBinMeanValue = calculateModeBinMean();
+                Log.d("modeBinMeanValue", "Mode Bin Mean RSSI Value: " + modeBinMeanValue);
+                //Calculate Distance W/O Offset
+                distance = calculateDistance(modeBinMeanValue);
+                Log.d("!!DISTANCE!!", "Calculated Distance: " + distance + "m");
+                results.put("distance", distance);
+                results.put("rssi", modeBinMeanValue);
+                rssiSamples.clear(); // Reset the list after processing
+            }
+            /*Frames*/
             results = identifyEddystoneFrames(scanRecord);
             updateDisplay();
+
         }
     };
     private void updateDisplay() {
         StringBuilder displayText = new StringBuilder();
         displayText.append("N.ID: ").append(results.get("uid")).append("\n");
         displayText.append("Distance: ").append(results.get("distance")).append("m\n");
+        displayText.append("RSSI: ").append(results.get("rssi")).append("dBm\n");
         displayText.append("Temperature: ").append(results.get("temperature")).append("°C\n");
         displayText.append("Voltage: ").append(results.get("voltage")).append("mV\n");
         displayText.append("URL: ").append(results.get("url"));
         if(isPressed)
             display.setText(displayText.toString());
     }
-    //TODO: Calibrate
-    /**
-     * RSSI to meter
-     * Distance = 10^((Measured Power - Instant RSSI)/(10*N)).
-     * N is the constant for the environmental factor (2-4)
-     * The measured power is the RSSI value at one meter
-     */
-    public float calculateDistance(int rssi) {
-        float filteredRSSI = maFilter(rssi);
-        float dist = (float) Math.pow(10, (RSSI_AT_1M - filteredRSSI) / (10 * PATH_LOSS_EXPONENT));
-        //Log.d("DISTANCEINMETERS", String.valueOf(dist));
-        dist = (float) (Math.round(dist*Math.pow(10,2))/Math.pow(10,2));
-        return dist;
-    }
+
     /*Reference Lecture Slide*/
     private Map<String, Object> identifyEddystoneFrames(byte[] scanRecord) {
         int index = 0;
         while (index < scanRecord.length) {
             int length = scanRecord[index] & 0xFF;
             if (length == 0) break;
-
             int type = scanRecord[index + 1] & 0xFF;
             if (type == 0x16) { // 0x16 indicates Service Data
                 int serviceUUID = ((scanRecord[index + 3] & 0xFF) << 8) | (scanRecord[index + 2] & 0xFF);
@@ -280,7 +304,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     //Moving Average Filter to filer RSSI
-    private final int windowSize = 100; //Vary and Check
+    private final int windowSize = 10000; //Vary and Check
     private int head = 0;
     private float[] window = new float[windowSize];
     public float maFilter(int rssi){
@@ -297,7 +321,7 @@ public class MainActivity extends AppCompatActivity {
         Voltbytes[0] = (byte) (scanRecord[13] & 0xFF); // MSB //Big Endian
         Voltbytes[1] = (byte) (scanRecord[14] & 0xFF); // LSB
         int voltage = ((Voltbytes[0] & 0xFF) << 8) | (Voltbytes[1] & 0xFF);
-        Log.d("TLMFrame", "Voltage: " + voltage + " mV");
+        //Log.d("TLMFrame", "Voltage: " + voltage + " mV");
         return voltage;
     }
 
@@ -307,10 +331,10 @@ public class MainActivity extends AppCompatActivity {
         Tempbytes[1] = (byte) (scanRecord[16]& 0xFF);         // Upper byte
         // Convert the fractional part to a decimal
         double fractionalDecimal = Tempbytes[1] / 256.0;      //LSB/256
-        Log.d("DEBUGTEMPERATURE", "Raw MSB byte: " + String.format("%02X", Tempbytes[0]));
-        Log.d("DEBUGTEMPERATURE", "Raw LSB byte: " + String.format("%02X", Tempbytes[1]));
+        //Log.d("DEBUGTEMPERATURE", "Raw MSB byte: " + String.format("%02X", Tempbytes[0]));
+        //Log.d("DEBUGTEMPERATURE", "Raw LSB byte: " + String.format("%02X", Tempbytes[1]));
         double temperature = Tempbytes[0] + fractionalDecimal;
-        Log.d("TLMFrame", "Temperature: " + temperature + "C");
+        //Log.d("TLMFrame", "Temperature: " + temperature + "C");
         return (float) temperature;
     }
     public String getUID(byte[] namespaceId, byte[] instanceId){
@@ -319,9 +343,6 @@ public class MainActivity extends AppCompatActivity {
         String namespaceIdHex = bytesToHex(namespaceId);
         String instanceIdHex = bytesToHex(instanceId);
         UID = namespaceIdHex + "\nI.ID: " + instanceIdHex;
-        
-        Log.d("UIDFrame", "Namespace ID: " + namespaceIdHex);
-        Log.d("UIDFrame", "Instance ID: " + instanceIdHex);
         return UID;
     }
     private String bytesToHex(byte[] bytes) {
@@ -329,9 +350,7 @@ public class MainActivity extends AppCompatActivity {
         sb.append("0x");
         for (byte b : bytes) {
             sb.append(String.format("%02X", b));
-            //sb.append(":");
         }
-        //sb.setLength(sb.length() - 1);
         return sb.toString();
     }
 
@@ -355,11 +374,11 @@ public class MainActivity extends AppCompatActivity {
             }
             else if((urlbytes[i] == 0x00) || (urlbytes[i] == 0x01)) {
                 if(urlbytes[i] == 0x00) {
-                    str = str + ".com";
+                    //str = str + ".com";
                     break;
                 }
                 else if(urlbytes[i] == 0x01) {
-                    str = str + ".org";
+                    //str = str + ".org";
                     break;
                 }
             }
@@ -371,4 +390,75 @@ public class MainActivity extends AppCompatActivity {
 
         return str;
     }
+    /*
+     * Reference: “Estimating beacon proximity/distance based on RSSI - Bluetooth LE,” Stack Overflow. https://stackoverflow.com/questions/22784516/estimating-beacon-proximity-distance-based-on-rssi-bluetooth-le
+     * RSSI = TxPower - 10 * n * lg(d)
+     * n = 2 (in free space)
+     * d = 10 ^ ((TxPower - RSSI) / (10 * n))
+     */
+
+    //TODO: Calibrate
+    /**
+     * RSSI to meter
+     * Distance = 10^((Measured Power - Instant RSSI)/(10*N)).
+     * N is the constant for the environmental factor (2-4)
+     * The measured power is the RSSI value at one meter
+     */
+    public float calculateDistance(int rssi) {
+        //float filteredRSSI = maFilter(rssi);
+        float dist = (float) Math.pow(10, (RSSI_AT_1M - rssi) / (10 * PATH_LOSS_EXPONENT));
+        Log.d("DISTANCEINMETERS", String.valueOf(dist));
+        dist = (float) (Math.round(dist*Math.pow(10,2))/Math.pow(10,2));
+        return dist;
+    }
+
+    /**
+     *  Tx Power at 0m considered to be RSSI at 1m with an offset.
+     */
+    public double calculateOffsettedDistance(double rssi) {
+        // Calculate the distance using the given formula
+        double distance = Math.pow(10, (TX_POWER - rssi) / (10 * PATH_LOSS_EXPONENT));
+        // Adjust the distance with the offset
+        return distance + OFFSET;
+    }
+    public int calculateModeBinMean() {
+        List<Integer> modeBinValues = getModeBinValues();
+        int sum = 0;
+        for (int value : modeBinValues) {
+            sum += value;
+        }
+        return (int)sum / modeBinValues.size();
+    }
+
+    private List<Integer> getModeBinValues() {
+        Map<Integer, Integer> histogram = new HashMap<>();
+        for (int i = RANGE_MIN; i <= RANGE_MAX; i += BIN_WIDTH) {
+            histogram.put(i, 0);
+        }
+
+        for (int value : rssiSamples) {
+            int bin = ((value - RANGE_MIN) / BIN_WIDTH) * BIN_WIDTH + RANGE_MIN;
+            histogram.put(bin, histogram.getOrDefault(bin, 0) + 1);
+        }
+
+        int modeBin = RANGE_MIN;
+        int maxCount = 0;
+
+        for (Map.Entry<Integer, Integer> entry : histogram.entrySet()) {
+            if (entry.getValue() > maxCount) {
+                maxCount = entry.getValue();
+                modeBin = entry.getKey();
+            }
+        }
+
+        List<Integer> modeBinValues = new ArrayList<>();
+        for (int value : rssiSamples) {
+            if (value >= modeBin && value < modeBin + BIN_WIDTH) {
+                modeBinValues.add(value);
+            }
+        }
+
+        return modeBinValues;
+    }
+
 }
