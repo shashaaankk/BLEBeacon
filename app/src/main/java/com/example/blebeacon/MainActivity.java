@@ -1,10 +1,14 @@
 package com.example.blebeacon;
 
+import static java.lang.Math.pow;
+
 import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanResult;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
@@ -39,6 +43,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean scanning;
     private TextView display;
     private float distance = 0;
+    private float offset = 1;
     private String url = null;
     private String uid = null;
     private  float temperature = 0;
@@ -50,7 +55,7 @@ public class MainActivity extends AppCompatActivity {
     // Calibration Constants
     private final int TxPower = -17; //Obtained by looking at  UID Frame
     private static final int RSSI_AT_1M = -58;            //-17+(-41)
-    private static final double PATH_LOSS_EXPONENT = 2.6;
+    private static final double PATH_LOSS_EXPONENT = 2; //3;
     //Filtering Parameters
     private static final int REQUIRED_SAMPLE_COUNT = 100;
     /*
@@ -62,14 +67,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int RANGE_MAX = -10;
     private static final int RANGE_MIN = -90;
     private static final int BIN_WIDTH = 10;
-    // Kalman R & Q
-    final double KALMAN_R = 0.125d;
-    final double KALMAN_Q = 0.5d;
-    KalmanFilter mKalmanFilter;
-
+    private double ACTUAL_DISTANCE = 1;
     private static final double TX_POWER = -17; // Tx Power at 0 meters in dBm
-    private static double OFFSET = -700; // Adjust, OFFSET = actualDistance - calculatedDistance;
-
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,7 +83,6 @@ public class MainActivity extends AppCompatActivity {
 
         //Stop previous scanning upon creation
         scanning = false;
-        mKalmanFilter = new KalmanFilter(KALMAN_R, KALMAN_Q); // init Kalman Filter
         /*
          * Setting up BluetoothScanner for Discovering Nearby BLE Devices
          * Bluetooth Manager is used to obtain an instance of BluetoothAdapter
@@ -104,6 +102,13 @@ public class MainActivity extends AppCompatActivity {
             }
         } else {
             Toast.makeText(this, "BluetoothManager not available", Toast.LENGTH_SHORT).show();
+        }
+
+        if (bluetoothLeScanner != null)
+        {
+            scanning = false;     //Stop Scanning!
+            scanLeDevice();       //Start Scanning!
+            Log.d(null, "Starting Scan!");
         }
 
         Button toscanButton = findViewById(R.id.button);
@@ -203,42 +208,56 @@ public class MainActivity extends AppCompatActivity {
         if (!scanning) {
             Log.d("SCAN", "Scanning Now...");
             bluetoothAdapter.startLeScan(BleScanCallback);
+            bluetoothLeScanner.startScan(BleScanCallback1);
         } else {
             scanning = false;
             bluetoothAdapter.stopLeScan(BleScanCallback);
         }
     }
+    /*Same result as public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord){} */
+    private final ScanCallback BleScanCallback1 = new ScanCallback() {
+        @Override
+        public void onScanResult(int callbackType, ScanResult result) {
+            super.onScanResult(callbackType, result);
+            final int rssi1 = result.getRssi();
+            Log.d("!!!!!!!!NEWRSSI!!!!!!", String.valueOf(rssi1));
+        }
+    };
 
     private final BluetoothAdapter.LeScanCallback BleScanCallback = new BluetoothAdapter.LeScanCallback() {
         @SuppressLint("MissingPermission")
         @Override
         public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
-
+            results.put("rssi", rssi);
+            //Log.d("Received RSSI", "Received RSSI: " + rssi);
             /*Distance*/
-            double mFilteredRSSI = mKalmanFilter.applyFilter(rssi);
+
             rssiSamples.add(rssi);
             if(rssiSamples.size() >= REQUIRED_SAMPLE_COUNT)
             {
                 int modeBinMeanValue = calculateModeBinMean();
                 Log.d("modeBinMeanValue", "Mode Bin Mean RSSI Value: " + modeBinMeanValue);
+                //setOffset( ACTUAL_DISTANCE, modeBinMeanValue);
                 //Calculate Distance W/O Offset
                 distance = calculateDistance(modeBinMeanValue);
-                Log.d("!!DISTANCE!!", "Calculated Distance: " + distance + "m");
+                float offsettedDistance = distance + offset;
+                Log.d("!!DISTANCE!!", "Calculated Distance: " + offsettedDistance + "m");
                 results.put("distance", distance);
-                results.put("rssi", modeBinMeanValue);
+                results.put("frssi", modeBinMeanValue);
+                //results.put("rssi", modeBinMeanValue);
                 rssiSamples.clear(); // Reset the list after processing
             }
             /*Frames*/
             results = identifyEddystoneFrames(scanRecord);
             updateDisplay();
-
         }
     };
     private void updateDisplay() {
         StringBuilder displayText = new StringBuilder();
         displayText.append("N.ID: ").append(results.get("uid")).append("\n");
         displayText.append("Distance: ").append(results.get("distance")).append("m\n");
-        displayText.append("RSSI: ").append(results.get("rssi")).append("dBm\n");
+        displayText.append("Filtered RSSI: ").append(results.get("frssi")).append("dBm\n");
+        displayText.append("Unfiltered RSSI: ").append(results.get("rssi")).append("dBm\n");
         displayText.append("Temperature: ").append(results.get("temperature")).append("°C\n");
         displayText.append("Voltage: ").append(results.get("voltage")).append("mV\n");
         displayText.append("URL: ").append(results.get("url"));
@@ -406,9 +425,9 @@ public class MainActivity extends AppCompatActivity {
      */
     public float calculateDistance(int rssi) {
         //float filteredRSSI = maFilter(rssi);
-        float dist = (float) Math.pow(10, (RSSI_AT_1M - rssi) / (10 * PATH_LOSS_EXPONENT));
+        float dist = (float) pow(10, (RSSI_AT_1M - rssi) / (10 * PATH_LOSS_EXPONENT));
+        dist = (float) (Math.round(dist* pow(10,2))/ pow(10,2));
         Log.d("DISTANCEINMETERS", String.valueOf(dist));
-        dist = (float) (Math.round(dist*Math.pow(10,2))/Math.pow(10,2));
         return dist;
     }
 
@@ -417,10 +436,15 @@ public class MainActivity extends AppCompatActivity {
      */
     public double calculateOffsettedDistance(double rssi) {
         // Calculate the distance using the given formula
-        double distance = Math.pow(10, (TX_POWER - rssi) / (10 * PATH_LOSS_EXPONENT));
+        double distance = pow(10, (TX_POWER - rssi) / (10 * PATH_LOSS_EXPONENT));
         // Adjust the distance with the offset
-        return distance + OFFSET;
+        return distance + offset;
     }
+//    public void setOffset(double actualDistance, double measuredRssi) {
+//        double calculatedDistance = Math.pow(10, (TX_POWER - measuredRssi) / (10 * PATH_LOSS_EXPONENT));
+//        OFFSET = (float) (actualDistance - calculatedDistance);
+//    }
+
     public int calculateModeBinMean() {
         List<Integer> modeBinValues = getModeBinValues();
         int sum = 0;
