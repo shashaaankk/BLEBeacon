@@ -67,7 +67,6 @@ public class MainActivity extends AppCompatActivity {
     private static final int RANGE_MAX = -10;
     private static final int RANGE_MIN = -90;
     private static final int BIN_WIDTH = 10;
-    private double ACTUAL_DISTANCE = 1;
     private static final double TX_POWER = -17; // Tx Power at 0 meters in dBm
 
     @Override
@@ -394,6 +393,7 @@ public class MainActivity extends AppCompatActivity {
             else if((urlbytes[i] == 0x00) || (urlbytes[i] == 0x01)) {
                 if(urlbytes[i] == 0x00) {
                     //str = str + ".com";
+                    //exit when \0
                     break;
                 }
                 else if(urlbytes[i] == 0x01) {
